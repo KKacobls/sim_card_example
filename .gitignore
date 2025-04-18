@@ -1,0 +1,35 @@
+# Flutter build
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+
+# Android
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS
+ios/Pods/
+ios/Runner.xcworkspace/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# IDE settings
+.idea/
+.vscode/
+*.iml
+
+# Logs
+*.log
+
+# Others
+*.apk
+*.ipa
+
+# token
+.env

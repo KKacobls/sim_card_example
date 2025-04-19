@@ -28,3 +28,14 @@ macos/
 linux/
 windows/
 web/
+
+ios/
+linux/
+macos/
+test/
+web/
+windows/
+.metadata
+pubspec.lock
+README.md
+analysis_options.yaml

@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart'; // 需要添加此依賴到 pubspec.yaml
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -42,12 +44,14 @@ class HomeWrapper extends StatefulWidget {
   State<HomeWrapper> createState() => _HomeWrapperState();
 }
 
+// 1. 在 _HomeWrapperState 中新增日誌頁面和索引
 class _HomeWrapperState extends State<HomeWrapper> {
-  int _selectedIndex = 0; // 0: SIM 資訊頁, 1: POST Example
+  int _selectedIndex = 0; // 0: SIM 資訊頁, 1: POST Example, 2: 日誌頁
   Map<String, Map<String, String>> _versions = {};
 
   late SimInfoPage simInfoPage;
   late PostExamplePage postExamplePage;
+  late LogsPage logsPage;
 
   @override
   void initState() {
@@ -55,7 +59,7 @@ class _HomeWrapperState extends State<HomeWrapper> {
     _loadVersionsFromPrefs();
     simInfoPage = SimInfoPage(
       onGetVersions: () => _versions,
-      onDoPostSimData: _doPostWithSimData, // 這裡改用「上傳 SIM 卡資訊」
+      onDoPostSimData: _doPostWithSimData, 
     );
     postExamplePage = PostExamplePage(
       onGetVersions: () => _versions,
@@ -65,33 +69,12 @@ class _HomeWrapperState extends State<HomeWrapper> {
           _versions = newVersions;
         });
       },
-      onDoPost: _doPostWithVersionJson, // 這裡維持「用版本裡的 JSON 做 POST」
+      onDoPost: _doPostWithVersionJson,
     );
+    logsPage = const LogsPage();
   }
-
-  /// 載入已儲存版本
-  Future<void> _loadVersionsFromPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final versionsString = prefs.getString('versions');
-    if (versionsString != null) {
-      final Map<String, dynamic> decoded = jsonDecode(versionsString);
-      final Map<String, Map<String, String>> parsed = decoded.map((key, value) {
-        return MapEntry(key, Map<String, String>.from(value));
-      });
-      setState(() {
-        _versions = parsed;
-      });
-    }
-  }
-
-  /// 寫入 versions
-  Future<void> _saveVersionsToPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final encoded = jsonEncode(_versions);
-    await prefs.setString('versions', encoded);
-  }
-
-  /// 這個方法用「版本」內的 JSON Data 做 POST（第二頁用）
+  
+  // 2. 修改 _doPostWithVersionJson 方法以記錄日誌
   Future<String> _doPostWithVersionJson(String versionName) async {
     final data = _versions[versionName];
     if (data == null) {
@@ -119,19 +102,44 @@ class _HomeWrapperState extends State<HomeWrapper> {
       return "版本 '$versionName' 的 JSON Data 解析失敗: $e";
     }
 
+    String responseResult = "";
     try {
       final response = await http.post(
         Uri.parse(url),
         headers: headersMap,
         body: jsonEncode(jsonDataObj),
       );
-      return "狀態碼: ${response.statusCode}\n回傳值: ${response.body}";
+      responseResult = "狀態碼: ${response.statusCode}\n回傳值: ${response.body}";
+      
+      // 記錄日誌
+      await LogsService.addLog(LogEntry(
+        url: url,
+        headers: data["headers"] ?? "{}",
+        jsonData: data["jsonData"] ?? "{}",
+        versionName: versionName,
+        timestamp: DateTime.now(),
+        responseStatus: responseResult,
+      ));
+      
+      return responseResult;
     } catch (e) {
-      return "POST 發生錯誤: $e";
+      responseResult = "POST 發生錯誤: $e";
+      
+      // 同樣記錄錯誤
+      await LogsService.addLog(LogEntry(
+        url: url,
+        headers: data["headers"] ?? "{}",
+        jsonData: data["jsonData"] ?? "{}",
+        versionName: versionName,
+        timestamp: DateTime.now(),
+        responseStatus: responseResult,
+      ));
+      
+      return responseResult;
     }
   }
 
-  /// 這個方法：上傳 SIM 卡資訊，並包成 json_data={"content": <sim卡JSON>}
+  // 3. 修改 _doPostWithSimData 方法以記錄日誌
   Future<String> _doPostWithSimData(String versionName, List<Map<String, dynamic>> simCards) async {
     final data = _versions[versionName];
     if (data == null) {
@@ -159,26 +167,57 @@ class _HomeWrapperState extends State<HomeWrapper> {
     final bodyObj = {
       "content": simJsonString,
     };
+    
+    // 轉為JSON字串用於日誌記錄
+    final jsonDataString = jsonEncode(bodyObj);
 
+    String responseResult = "";
     try {
       final response = await http.post(
         Uri.parse(url),
         headers: headersMap,
         body: jsonEncode(bodyObj),
       );
-      return "狀態碼: ${response.statusCode}\n回傳值: ${response.body}";
+      responseResult = "狀態碼: ${response.statusCode}\n回傳值: ${response.body}";
+      
+      // 記錄日誌
+      await LogsService.addLog(LogEntry(
+        url: url,
+        headers: data["headers"] ?? "{}",
+        jsonData: jsonDataString,
+        versionName: versionName,
+        timestamp: DateTime.now(),
+        responseStatus: responseResult,
+      ));
+      
+      return responseResult;
     } catch (e) {
-      return "POST 發生錯誤: $e";
+      responseResult = "POST 發生錯誤: $e";
+      
+      // 同樣記錄錯誤
+      await LogsService.addLog(LogEntry(
+        url: url,
+        headers: data["headers"] ?? "{}",
+        jsonData: jsonDataString,
+        versionName: versionName,
+        timestamp: DateTime.now(),
+        responseStatus: responseResult,
+      ));
+      
+      return responseResult;
     }
   }
-
+  
+  // 4. 修改 build 方法以添加日誌選項到 Drawer 中
   @override
   Widget build(BuildContext context) {
     Widget body;
     if (_selectedIndex == 0) {
       body = simInfoPage;
-    } else {
+    } else if (_selectedIndex == 1) {
       body = postExamplePage;
+    } else {
+      body = logsPage;
     }
 
     return Scaffold(
@@ -206,14 +245,47 @@ class _HomeWrapperState extends State<HomeWrapper> {
               },
               selected: _selectedIndex == 1,
             ),
+            ListTile(
+              title: const Text('POST 日誌'),
+              onTap: () {
+                setState(() => _selectedIndex = 2);
+                Navigator.pop(context);
+              },
+              selected: _selectedIndex == 2,
+            ),
           ],
         ),
       ),
       body: body,
     );
   }
+
+/// 儲存版本資料到 SharedPreferences
+Future<void> _saveVersionsToPrefs() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('versions', jsonEncode(_versions));
+  debugPrint("✅ 版本資料已儲存");
 }
 
+/// 從 SharedPreferences 載入版本資料
+Future<void> _loadVersionsFromPrefs() async {
+  final prefs = await SharedPreferences.getInstance();
+  final jsonStr = prefs.getString('versions');
+  if (jsonStr != null) {
+    try {
+      final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final parsed = decoded.map((key, value) =>
+          MapEntry(key, Map<String, String>.from(value)));
+      setState(() {
+        _versions = parsed;
+      });
+      debugPrint("✅ 載入版本資料成功: ${_versions.length} 筆");
+    } catch (e) {
+      debugPrint("❌ 版本資料解析失敗: $e");
+    }
+  }
+}
+}
 /// 第一欄 (主畫面) - 顯示 SIM 卡資訊 + 下方可選版本, 重新讀取, POST
 /// 這次在 POST 時 -> json_data={"content": <simCards的JSON>}
 class SimInfoPage extends StatefulWidget {
@@ -556,6 +628,224 @@ class _PostExamplePageState extends State<PostExamplePage> {
           ],
         ),
       ),
+    );
+  }
+}
+// 首先，創建一個 LogEntry 類來儲存每次 POST 的詳細資訊
+class LogEntry {
+  final String url;
+  final String headers;
+  final String jsonData;
+  final String versionName;
+  final DateTime timestamp;
+  final String responseStatus; // 可選儲存回應狀態
+
+  LogEntry({
+    required this.url,
+    required this.headers,
+    required this.jsonData,
+    required this.versionName,
+    required this.timestamp,
+    this.responseStatus = '',
+  });
+
+  // 轉換成 Map 用於儲存
+  Map<String, dynamic> toJson() {
+    return {
+      'url': url,
+      'headers': headers,
+      'jsonData': jsonData,
+      'versionName': versionName,
+      'timestamp': timestamp.toIso8601String(),
+      'responseStatus': responseStatus,
+    };
+  }
+
+  // 從 Map 創建 LogEntry
+  factory LogEntry.fromJson(Map<String, dynamic> json) {
+    return LogEntry(
+      url: json['url'] ?? '',
+      headers: json['headers'] ?? '',
+      jsonData: json['jsonData'] ?? '',
+      versionName: json['versionName'] ?? '',
+      timestamp: DateTime.parse(json['timestamp']),
+      responseStatus: json['responseStatus'] ?? '',
+    );
+  }
+}
+
+// 新增一個 LogsService 類來管理日誌
+class LogsService {
+  static const String _storageKey = 'post_logs';
+  
+  // 獲取所有日誌
+  static Future<List<LogEntry>> getLogs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? logsString = prefs.getString(_storageKey);
+    if (logsString == null || logsString.isEmpty) {
+      return [];
+    }
+    
+    try {
+      final List<dynamic> decoded = jsonDecode(logsString);
+      return decoded.map((item) => LogEntry.fromJson(item)).toList();
+    } catch (e) {
+      debugPrint('解析日誌失敗: $e');
+      return [];
+    }
+  }
+  
+  // 添加新日誌
+  static Future<void> addLog(LogEntry log) async {
+    final List<LogEntry> currentLogs = await getLogs();
+    currentLogs.insert(0, log); // 新紀錄放在最前面
+    
+    // 限制日誌數量，避免過多
+    if (currentLogs.length > 100) {
+      currentLogs.removeRange(100, currentLogs.length);
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = jsonEncode(currentLogs.map((log) => log.toJson()).toList());
+    await prefs.setString(_storageKey, encoded);
+  }
+  
+  // 清除所有日誌
+  static Future<void> clearLogs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_storageKey);
+  }
+}
+
+// 日誌頁面
+class LogsPage extends StatefulWidget {
+  const LogsPage({Key? key}) : super(key: key);
+  
+  @override
+  State<LogsPage> createState() => _LogsPageState();
+}
+
+class _LogsPageState extends State<LogsPage> {
+  List<LogEntry> _logs = [];
+  bool _isLoading = true;
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadLogs();
+  }
+  
+  Future<void> _loadLogs() async {
+    setState(() => _isLoading = true);
+    final logs = await LogsService.getLogs();
+    setState(() {
+      _logs = logs;
+      _isLoading = false;
+    });
+  }
+  
+  Future<void> _clearLogs() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('確認清除'),
+        content: const Text('確定要清除所有日誌嗎？此操作無法復原。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await LogsService.clearLogs();
+              _loadLogs();
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('日誌已清除'))
+              );
+            },
+            child: const Text('確定'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('POST 日誌'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadLogs,
+            tooltip: '重新載入',
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_forever),
+            onPressed: _clearLogs,
+            tooltip: '清除全部',
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _logs.isEmpty
+              ? const Center(child: Text('暫無日誌記錄'))
+              : ListView.builder(
+                  itemCount: _logs.length,
+                  itemBuilder: (context, index) {
+                    final log = _logs[index];
+                    final timestamp = DateFormat('yyyy-MM-dd HH:mm:ss').format(log.timestamp);
+                    
+                    return ExpansionTile(
+                      title: Text('${log.versionName} - $timestamp'),
+                      subtitle: Text(log.url),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('URL: ${log.url}'),
+                              const SizedBox(height: 8),
+                              Text('版本: ${log.versionName}'),
+                              const SizedBox(height: 8),
+                              const Text('Headers:'),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                color: Colors.black12,
+                                width: double.infinity,
+                                child: Text(const JsonEncoder.withIndent('  ').convert(
+                                    jsonDecode(log.headers))),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text('JSON Data:'),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                color: Colors.black12,
+                                width: double.infinity,
+                                child: Text(const JsonEncoder.withIndent('  ').convert(
+                                    jsonDecode(log.jsonData))),
+                              ),
+                              if (log.responseStatus.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                const Text('回應:'),
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  color: Colors.black12,
+                                  width: double.infinity,
+                                  child: Text(log.responseStatus),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
     );
   }
 }

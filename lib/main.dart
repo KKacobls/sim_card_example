@@ -5,9 +5,19 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // 確保 Flutter 已初始化
-  await dotenv.load(fileName: ".env");       // 載入 .env
-  runApp(const MyApp());                     // 再啟動 App
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await dotenv.load(fileName: ".env");
+    debugPrint("✅ .env 載入成功");
+  } catch (e) {
+    debugPrint("⚠️ .env 載入失敗: $e");
+    // 提供默認值，避免後續使用時出錯
+    dotenv.env['DISCORD_BOT_TOKEN'] = '';
+    dotenv.env['CHANNELS'] = '';
+  }
+
+  runApp(const MyApp());
 }
 
 /// 根 Widget
@@ -396,8 +406,14 @@ class _PostExamplePageState extends State<PostExamplePage> {
   @override
   void initState() {
     super.initState();
-    final discordToken = dotenv.env['DISCORD_BOT_TOKEN'];
-    final channels = dotenv.env['CHANNELS'];
+
+    final discordToken = dotenv.env['DISCORD_BOT_TOKEN'] ?? '';
+    final channels = dotenv.env['CHANNELS'] ?? '';
+
+    if (discordToken.isEmpty || channels.isEmpty) {
+      debugPrint('⚠️ .env 未正確提供 DISCORD_BOT_TOKEN 或 CHANNELS');
+    }
+
     _urlCtrl.text = "https://discord.com/api/v9/channels/$channels/messages";
     _headersCtrl.text = jsonEncode({
       "Authorization": "Bot $discordToken",
